@@ -75,8 +75,9 @@ def model_load(config):
     model = eval('models.' + config.MODEL.NAME + '.get_pose_net')(config, is_train=False)
     if torch.cuda.is_available():
         model = model.cuda()
-
-    state_dict = torch.load(config.OUTPUT_DIR, map_location=torch.device('cpu'))
+        state_dict = torch.load(config.OUTPUT_DIR)
+    else:
+        state_dict = torch.load(config.OUTPUT_DIR, map_location=torch.device('cpu'))
     from collections import OrderedDict
     new_state_dict = OrderedDict()
     for k, v in state_dict.items():
