@@ -272,7 +272,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # chk_file = '.../epoch_60.bin'
-    kps_file = '.../2d_keypoints.npz'
+    # kps_file = '.../2d_keypoints.npz'
     # video_path = '.../sittingdown.mp4'
     # viz_output = '.../output_animation.mp4'
 
