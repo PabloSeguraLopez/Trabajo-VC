@@ -147,6 +147,9 @@ static
 # ignore file.npz
 *.npz
 
+# ignore file.bvh
+*.bvh
+
 # ignore file.pth
 *.pth
 
