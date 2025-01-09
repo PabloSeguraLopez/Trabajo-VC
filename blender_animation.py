@@ -1,107 +1,164 @@
 import bpy
 import numpy as np
+import argparse
+import sys
 
-# Ruta del archivo NPZ
-npz_file_path = "C:/Users/pablo/Desktop/Universidad/Cuarto/Visión por computador/Prácticas/Trabajo-VC/GAST-Net/output/fortnite.npz"
+def load_npz(npz_file_path):
+    """
+    Load the NPZ file and extract the positions.
+    """
+    data = np.load(npz_file_path)
+    positions = data["reconstruction"]
+    return positions[0]  # (n_frames, n_squares, 3)
 
-# Cargar el archivo NPZ
-data = np.load(npz_file_path)
+def clear_scene():
+    """
+    Clears all objects, lights and cameras from the scene.
+    """
+    # Eliminar todos los objetos en la escena
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete()
 
+    # Eliminar todas las luces
+    bpy.ops.object.light_add(type='POINT', location=(0, 0, 0))
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete()
 
-positions = data["reconstruction"]
+    # Eliminar todas las cámaras
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete()
+    
+def create_objects(positions):
+    """
+    Create objects (joints) in Blender and return them.
+    """
+    # Crear un material negro
+    black_material = bpy.data.materials.new(name="Black_Material")
+    black_material.use_nodes = True
+    nodes = black_material.node_tree.nodes
+    principled_node = nodes.get("Principled BSDF")
+    if principled_node:
+        # Establecer el color a negro (RGBA)
+        principled_node.inputs["Base Color"].default_value = (0.0, 0.0, 0.0, 1.0)  # Negro
+        principled_node.inputs["Roughness"].default_value = 1.0  # Opcional: Sin reflejos
 
-if positions.ndim != 4 or positions.shape[0] != 1 or positions.shape[3] != 3:
-    raise ValueError("Las dimensiones del array deben ser (1, n_frames, n_cuadrados, 3).")
+    n_frames, n_joints, _ = positions.shape
+    bpy.ops.object.empty_add(type='PLAIN_AXES', location=(0, 0, 0))
+    parent_object = bpy.context.object
+    parent_object.name = "Joints_Parent"
 
-
-positions = positions[0]  # (n_frames, n_cuadrados, 3)
-
-n_frames, n_cuadrados, _ = positions.shape
-
-# Crear un objeto padre para manejar más fácilmente el personaje
-bpy.ops.object.empty_add(type='PLAIN_AXES', location=(0, 0, 0))
-parent_object = bpy.context.object
-parent_object.name = "Joints_Parent"
-
-# Crear los objetos (esferas) en Blender
-objects = []
-for i in range(n_cuadrados):
-    # Las articulaciones 9 y 7 son redudantes, forman parte de la columna
-    if i == 9 or i == 7:
-        objects.append(None)
-        continue
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.1, location=(0, 0, 0))
-    obj = bpy.context.object
-    obj.name = f"Joint_{i}"
-    obj.parent = parent_object
-    objects.append(obj)
-
-# Animar los objetos según las posiciones del archivo NPZ
-for frame_idx in range(n_frames):
-    for square_idx, obj in enumerate(objects):
-        if obj is None:
+    objects = []
+    for i in range(n_joints):
+        # Joints 9 and 7 are redundant, part of the column
+        if i == 9 or i == 7:
+            objects.append(None)
             continue
-        x, y, z = positions[frame_idx, square_idx]
-        obj.location = (x, y, z)
-        obj.keyframe_insert(data_path="location", frame=frame_idx + 1)
+        bpy.ops.mesh.primitive_uv_sphere_add(radius=0.1, location=(0, 0, 0))
+        obj = bpy.context.object
+        obj.name = f"Joint_{i}"
+        obj.parent = parent_object
+        objects.append(obj)
+        if obj.data.materials:
+            obj.data.materials[0] = black_material
+        else:
+            obj.data.materials.append(black_material)
 
-# Añadir una cámara
-bpy.ops.object.camera_add(location=(0, 5.92, 1.72))
-camera = bpy.context.object
-camera.name = "Camera"
-camera.rotation_euler = (1.466, 0, -3.1416)  # Orientar hacia el origen
+    return objects
 
-bpy.context.scene.camera = camera
+def animate_objects(positions, objects):
+    """
+    Animate the objects according to the positions from the NPZ.
+    """
+    n_frames, n_squares, _ = positions.shape
+    for frame_idx in range(n_frames):
+        for square_idx, obj in enumerate(objects):
+            if obj is None:
+                continue
+            x, y, z = positions[frame_idx, square_idx]
+            obj.location = (x, y, z)
+            obj.keyframe_insert(data_path="location", frame=frame_idx + 1)
 
-# Añadir iluminación
-bpy.ops.object.light_add(type='SUN', location=(5, -5, 10))
-sun_light = bpy.context.object
-sun_light.name = "Sun_Light"
+def setup_camera():
+    bpy.ops.object.camera_add(location=(0, 5.92, 1.72))
+    camera = bpy.context.object
+    camera.name = "Camera"
+    camera.rotation_euler = (1.466, 0, -3.1416)  # Orient it towards the origin
 
-# Configurar fondo
-world = bpy.context.scene.world
-world.use_nodes = True
+    bpy.context.scene.camera = camera
 
-# Obtener nodos del mundo
-nodes = world.node_tree.nodes
-links = world.node_tree.links
+def setup_light():
+    bpy.ops.object.light_add(type='SUN', location=(5, -5, 10))
+    sun_light = bpy.context.object
+    sun_light.name = "Sun_Light"
 
-# Limpiar nodos existentes
-for node in nodes:
-    nodes.remove(node)
+def setup_world_background(background_color):
+    world = bpy.context.scene.world
+    world.use_nodes = True
+    nodes = world.node_tree.nodes
+    links = world.node_tree.links
 
-# Añadir nodo de fondo
-background_node = nodes.new(type="ShaderNodeBackground")
-background_node.inputs[0].default_value = (0.5, 0.2, 0.1, 1.0)  # Color azul claro
+    # Clean existing nodes
+    for node in nodes:
+        nodes.remove(node)
 
-# Añadir nodo de salida del mundo
-output_node = nodes.new(type="ShaderNodeOutputWorld")
+    background_node = nodes.new(type="ShaderNodeBackground")
+    # Convert color string to RGB
+    color_dict = {
+        "red": (1.0, 0.0, 0.0, 1.0),
+        "green": (0.0, 1.0, 0.0, 1.0),
+        "blue": (0.0, 0.0, 1.0, 1.0),
+        "white": (1.0, 1.0, 1.0, 1.0),
+    }
+    background_node.inputs[0].default_value = color_dict.get(background_color, (0.5, 0.2, 0.1, 1.0))  # Default to custom color if not found
 
-# Conectar los nodos
-links.new(background_node.outputs[0], output_node.inputs[0])
-if False:
-    # Configuración de salida para MP4
-    output_path = "C:/Users/pablo/Desktop/baseball.mp4"  # Cambia la ruta según lo desees
+    output_node = nodes.new(type="ShaderNodeOutputWorld")
+    links.new(background_node.outputs[0], output_node.inputs[0])
+
+def setup_render(output_path, n_frames, quality):
     bpy.context.scene.render.filepath = output_path
-
-    # Establecer el formato de salida a FFmpeg (MP4)
     bpy.context.scene.render.image_settings.file_format = 'FFMPEG'
     bpy.context.scene.render.ffmpeg.format = 'MPEG4'
     bpy.context.scene.render.ffmpeg.codec = 'MPEG4'
-
-    # Ajustar resolución (opcional, en este caso 1920x1080)
-    bpy.context.scene.render.resolution_x = 1920
-    bpy.context.scene.render.resolution_y = 1080
-
-    # Establecer la tasa de fotogramas (FPS)
-    bpy.context.scene.render.fps = 30  # Ajusta esto según tus necesidades
-
-    # Definir el rango de fotogramas a renderizar
+    if quality == "low":
+        bpy.context.scene.render.resolution_x = 640
+        bpy.context.scene.render.resolution_y = 360
+    else:
+        bpy.context.scene.render.resolution_x = 1920
+        bpy.context.scene.render.resolution_y = 1080
+    bpy.context.scene.render.fps = 30
     bpy.context.scene.frame_start = 1
     bpy.context.scene.frame_end = n_frames
+    bpy.context.view_layer.update()
 
-    # Hacer el renderizado de la animación
+def render_animation():
     bpy.ops.render.render(animation=True)
+    print("Animation successfully saved as MP4.")
 
-print("Animación guardada como MP4 exitosamente.")
+def main(npz_file_path, background_color, output_path, quality):
+    clear_scene()
+    positions = load_npz(npz_file_path)
+    n_frames, n_squares, _ = positions.shape
 
+    objects = create_objects(positions)
+
+    animate_objects(positions, objects)
+
+    setup_camera()
+    setup_light()
+
+    setup_world_background(background_color)
+
+    setup_render(output_path, n_frames, quality)
+
+    render_animation()
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Animate and render a 3D character based on 3D skeletons from an NPZ file.")
+    parser.add_argument('-f', '--file', required=True, help="Path to the NPZ file.")
+    parser.add_argument('-c', '--color', default="white", help="Background color (e.g., 'red', 'green', 'blue').")
+    parser.add_argument('-o', '--output', required=True, help="Path for the output video file.")
+    parser.add_argument('-q', '--quality', default="low", help="Quality for the output video.")
+    
+    args,_ = parser.parse_known_args(sys.argv[sys.argv.index("--") + 1:])
+
+    main(args.file, args.color, args.output, args.quality)
